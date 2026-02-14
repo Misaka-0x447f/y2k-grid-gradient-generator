@@ -143,8 +143,14 @@ function generateGradientSVG(width: number, height: number, squareSize: number, 
     return { fg: "#000", bg: globalBg, size: 1 };
   }
 
-  const elements: string[] = [];
-  elements.push(`<rect width="${width}" height="${height}" fill="${globalBg}"/>`);
+  // Collect raw rects as objects for merging
+  interface RawRect {
+    x: number; y: number; w: number; h: number;
+    fill: string; opacity?: number; shapeRendering?: string;
+  }
+
+  const bgRect: RawRect = { x: 0, y: 0, w: width, h: height, fill: globalBg };
+  const rawRects: RawRect[] = [];
 
   for (let row = 0; row < rows; row++) {
     for (let col = 0; col < cols; col++) {
@@ -156,9 +162,7 @@ function generateGradientSVG(width: number, height: number, squareSize: number, 
       const { fg, bg, size } = getCellInfo(xPercent);
 
       if (bg && bg !== globalBg) {
-        elements.push(
-          `<rect x="${cellX}" y="${cellY}" width="${squareSize}" height="${squareSize}" fill="${bg}"/>`
-        );
+        rawRects.push({ x: cellX, y: cellY, w: squareSize, h: squareSize, fill: bg });
       }
 
       if (fg && size > 0.001) {
@@ -171,28 +175,101 @@ function generateGradientSVG(width: number, height: number, squareSize: number, 
           if (lower > 0) {
             const sx = cx - lower / 2;
             const sy = cellY + squareSize / 2 - lower / 2;
-            elements.push(
-              `<rect x="${sx.toFixed(2)}" y="${sy.toFixed(2)}" width="${lower.toFixed(2)}" height="${lower.toFixed(2)}" fill="${fg}" shape-rendering="geometricPrecision"/>`
-            );
+            rawRects.push({ x: sx, y: sy, w: lower, h: lower, fill: fg, shapeRendering: "geometricPrecision" });
           }
           if (frac > 0.001 && upper <= squareSize) {
             const sx = cx - upper / 2;
             const sy = cellY + squareSize / 2 - upper / 2;
-            elements.push(
-              `<rect x="${sx.toFixed(2)}" y="${sy.toFixed(2)}" width="${upper.toFixed(2)}" height="${upper.toFixed(2)}" fill="${fg}" opacity="${frac.toFixed(3)}" shape-rendering="geometricPrecision"/>`
-            );
+            rawRects.push({ x: sx, y: sy, w: upper, h: upper, fill: fg, opacity: frac, shapeRendering: "geometricPrecision" });
           }
         } else {
           if (rawSize > 0) {
             const sx = cx - rawSize / 2;
             const sy = cellY + squareSize / 2 - rawSize / 2;
-            elements.push(
-              `<rect x="${sx.toFixed(2)}" y="${sy.toFixed(2)}" width="${rawSize.toFixed(2)}" height="${rawSize.toFixed(2)}" fill="${fg}" shape-rendering="geometricPrecision"/>`
-            );
+            rawRects.push({ x: sx, y: sy, w: rawSize, h: rawSize, fill: fg, shapeRendering: "geometricPrecision" });
           }
         }
       }
     }
+  }
+
+  // Merge rects: group by matching attributes, then merge vertically (same column), then horizontally
+  function visualKey(r: RawRect): string {
+    return `${r.fill}|${r.opacity ?? ""}|${r.shapeRendering ?? ""}`;
+  }
+
+  // Step 1: Group by visual key + x + w, merge vertically contiguous rects in same column
+  function mergeVertically(rects: RawRect[]): RawRect[] {
+    const groups = new Map<string, RawRect[]>();
+    for (const r of rects) {
+      const k = `${visualKey(r)}|${r.x}|${r.w}`;
+      let arr = groups.get(k);
+      if (!arr) { arr = []; groups.set(k, arr); }
+      arr.push(r);
+    }
+    const merged: RawRect[] = [];
+    for (const arr of groups.values()) {
+      arr.sort((a, b) => a.y - b.y);
+      let cur = { ...arr[0] };
+      for (let i = 1; i < arr.length; i++) {
+        const r = arr[i];
+        const curBottom = Math.round((cur.y + cur.h) * 1e6) / 1e6;
+        const rTop = Math.round(r.y * 1e6) / 1e6;
+        if (Math.abs(curBottom - rTop) < 1e-4) {
+          cur.h += r.h;
+        } else {
+          merged.push(cur);
+          cur = { ...r };
+        }
+      }
+      merged.push(cur);
+    }
+    return merged;
+  }
+
+  // Step 2: Group by key + y + h, merge horizontally contiguous rects
+  function mergeHorizontally(rects: RawRect[]): RawRect[] {
+    const groups = new Map<string, RawRect[]>();
+    for (const r of rects) {
+      const k = `${visualKey(r)}|${r.y}|${r.h}`;
+      let arr = groups.get(k);
+      if (!arr) { arr = []; groups.set(k, arr); }
+      arr.push(r);
+    }
+    const merged: RawRect[] = [];
+    for (const arr of groups.values()) {
+      arr.sort((a, b) => a.x - b.x);
+      let cur = { ...arr[0] };
+      for (let i = 1; i < arr.length; i++) {
+        const r = arr[i];
+        const curRight = Math.round((cur.x + cur.w) * 1e6) / 1e6;
+        const rLeft = Math.round(r.x * 1e6) / 1e6;
+        if (Math.abs(curRight - rLeft) < 1e-4) {
+          cur.w += r.w;
+        } else {
+          merged.push(cur);
+          cur = { ...r };
+        }
+      }
+      merged.push(cur);
+    }
+    return merged;
+  }
+
+  const mergedRects = mergeHorizontally(mergeVertically(rawRects));
+
+  // Build SVG elements
+  const elements: string[] = [];
+  function fmtNum(n: number): string {
+    const r = Math.round(n * 100) / 100;
+    return r === Math.floor(r) ? r.toString() : r.toFixed(2);
+  }
+  elements.push(`<rect width="${width}" height="${height}" fill="${bgRect.fill}"/>`);
+  for (const r of mergedRects) {
+    let attrs = `x="${fmtNum(r.x)}" y="${fmtNum(r.y)}" width="${fmtNum(r.w)}" height="${fmtNum(r.h)}" fill="${r.fill}"`;
+    if (r.opacity !== undefined) attrs += ` opacity="${r.opacity.toFixed(3)}"`;
+    if (r.shapeRendering) attrs += ` shape-rendering="${r.shapeRendering}"`;
+    elements.push(`<rect ${attrs}/>`);
   }
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
