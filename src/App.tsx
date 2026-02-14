@@ -1,4 +1,4 @@
-import {useState, useRef, useCallback, useMemo, type CSSProperties, type MouseEvent} from "react";
+import {useState, useRef, useCallback, useMemo, type CSSProperties, type MouseEvent, useEffect} from "react";
 
 // Define the type for a single color stop
 interface Stop {
@@ -13,6 +13,61 @@ const DEFAULT_STOPS: Stop[] = [
   { position: 50, color: "#c0c0c0", isLargeEnd: false },
   { position: 100, color: "#6e1a1a", isLargeEnd: true },
 ];
+
+// --- URL State Sync ---
+
+function base64ToUint8Array(base64: string): Uint8Array {
+  const binary_string = atob(base64);
+  const len = binary_string.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binary_string.charCodeAt(i);
+  }
+  return bytes;
+}
+
+function getInitialState() {
+  const defaults = {
+    width: 400,
+    height: 80,
+    squareSize: 8,
+    sizeStep: 1,
+    selector: "#gradient-target",
+    stops: DEFAULT_STOPS,
+    bgColor: "#c0c0c0",
+  };
+
+  const params = new URLSearchParams(window.location.search);
+  const config = params.get('config');
+
+  if (config) {
+    try {
+      const uint8array = base64ToUint8Array(config);
+      const decoder = new TextDecoder();
+      const jsonString = decoder.decode(uint8array);
+      const decoded = JSON.parse(jsonString);
+
+      if (typeof decoded === 'object' && decoded !== null) {
+        return {
+          width: typeof decoded.width === 'number' ? decoded.width : defaults.width,
+          height: typeof decoded.height === 'number' ? decoded.height : defaults.height,
+          squareSize: typeof decoded.squareSize === 'number' ? decoded.squareSize : defaults.squareSize,
+          sizeStep: typeof decoded.sizeStep === 'number' ? decoded.sizeStep : defaults.sizeStep,
+          selector: typeof decoded.selector === 'string' ? decoded.selector : defaults.selector,
+          stops: Array.isArray(decoded.stops) ? decoded.stops : defaults.stops,
+          bgColor: typeof decoded.bgColor === 'string' ? decoded.bgColor : defaults.bgColor,
+        };
+      }
+    } catch (e) {
+      console.error("Failed to parse config from URL", e);
+    }
+  }
+  return defaults;
+}
+
+const initialState = getInitialState();
+
+// --- End URL State Sync ---
 
 function smoothstep(t: number): number {
   return t * t * (3 - 2 * t);
@@ -202,14 +257,31 @@ function StopEditor({ stop, index, onChange, onRemove, canRemove }: StopEditorPr
 }
 
 export default function App() {
-  const [width, setWidth] = useState<number>(400);
-  const [height, setHeight] = useState<number>(80);
-  const [squareSize, setSquareSize] = useState<number>(8);
-  const [sizeStep, setSizeStep] = useState<number>(1);
-  const [selector, setSelector] = useState<string>("#gradient-target");
-  const [stops, setStops] = useState<Stop[]>(DEFAULT_STOPS);
-  const [bgColor, setBgColor] = useState<string>("#c0c0c0");
+  const [width, setWidth] = useState<number>(initialState.width);
+  const [height, setHeight] = useState<number>(initialState.height);
+  const [squareSize, setSquareSize] = useState<number>(initialState.squareSize);
+  const [sizeStep, setSizeStep] = useState<number>(initialState.sizeStep);
+  const [selector, setSelector] = useState<string>(initialState.selector);
+  const [stops, setStops] = useState<Stop[]>(initialState.stops);
+  const [bgColor, setBgColor] = useState<string>(initialState.bgColor);
   const svgContainerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const state = { width, height, squareSize, sizeStep, selector, stops, bgColor };
+    const encoder = new TextEncoder();
+    const uint8array = encoder.encode(JSON.stringify(state));
+
+    let binary = '';
+    uint8array.forEach((byte) => {
+      binary += String.fromCharCode(byte);
+    });
+    const encoded = btoa(binary);
+
+    const params = new URLSearchParams();
+    params.set('config', encoded);
+    const newUrl = `${window.location.pathname}?${params.toString()}`;
+    window.history.replaceState({}, '', newUrl);
+  }, [width, height, squareSize, sizeStep, selector, stops, bgColor]);
 
   const svgString = useMemo(() => {
     return generateGradientSVG(width, height, squareSize, stops, bgColor, sizeStep);
