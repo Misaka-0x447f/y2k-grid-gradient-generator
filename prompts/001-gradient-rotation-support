@@ -1,0 +1,49 @@
+用户：希望在现有代码的基础上增加设置渐变角度功能。我的思路是，将一列的方格整体偏移，比如说 45 度就从中间开始，每向上一格就向右偏移 1 格，每向下一格就向左偏移一格。但是如何处理大于 45 度的角度我还没想好，如果是基于 90 度来出会不会逻辑太复杂？
+Opus：好，现在我理解了完整的代码。来讨论你的问题。
+
+         角度旋转的分析
+
+         你说的"偏移"思路本质上就是投影。45° 时每行偏移 1 格 = 把 (col, row) 投影到对角线方向。
+
+         大于 45° 的角度之所以难处理，是因为 tan(angle) 在 45° 时 = 1，再往上会快速增长到无穷大（90°）。如果分段处理（0-45° 用行偏移列，45-90°
+         切换为列偏移行），逻辑确实变复杂而且临界点不好处理。
+
+         建议：直接用三角投影
+
+         其实不需要分段。只要把当前的 xPercent 计算换成沿任意角度的投影，一行公式覆盖 0°-360° 所有情况：
+
+         // 当前代码（第 159-160 行）：
+         const cx = cellX + squareSize / 2;
+         const xPercent = (cx / width) * 100;
+
+         // 改为：
+         const cx = cellX + squareSize / 2;
+         const cy = cellY + squareSize / 2;
+         const projected = cx * cosA + cy * sinA;
+         const xPercent = ((projected - minProj) / (maxProj - minProj)) * 100;
+
+         其中 cosA/sinA/minProj/maxProj 在循环外预算好（根据四个角点的投影取极值）。
+
+         效果验证：
+         - 0°：cos=1, sin=0 → projected = cx → 和现在完全一致
+         - 45°：projected = cx * 0.707 + cy * 0.707 → 对角线渐变，等价于你说的每行偏移 1 格
+         - 90°：cos=0, sin=1 → projected = cy → 纵向渐变
+
+         因为最终渲染还是在网格上，视觉上依然是你想要的离散网格偏移效果，不是平滑的。而且实现改动很小 —— 只改 generateGradientSVG 函数签名加一个
+         angle 参数，循环外预算三角值，循环内改一行。
+
+         要我直接实现吗？
+用户：好
+Opus：完成。改动总结：
+
+       1. generateGradientSVG 新增 angle 参数（默认 0，向后兼容）
+       2. 循环外预算 cosA、sinA、投影极值范围
+       3. 循环内将 xPercent = cx / width * 100 改为 xPercent = (projected - minProj) / projRange * 100，其中 projected = cx * cosA + cy * sinA
+       4. App 组件加了 angle state、URL 持久化、UI 输入框（0-359°）
+
+       0° = 原来的水平渐变，90° = 纵向渐变，45° = 对角线，任意角度都行。
+用户：角度值是不是应该更符合现有规范一点。。？
+Opus：对，现在 0° 是左到右，这是数学坐标系的约定。应该跟 CSS linear-gradient 一致：0° 从下到上，90° 从左到右，顺时针旋转。
+
+       改动很小，只需要调投影方向的计算。
+Opus：完事。现在角度语义和 CSS linear-gradient 一致。

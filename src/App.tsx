@@ -35,6 +35,7 @@ function getInitialState() {
     selector: "#gradient-target",
     stops: DEFAULT_STOPS,
     bgColor: "#c0c0c0",
+    angle: 90,
   };
 
   const params = new URLSearchParams(window.location.search);
@@ -56,6 +57,7 @@ function getInitialState() {
           selector: typeof decoded.selector === 'string' ? decoded.selector : defaults.selector,
           stops: Array.isArray(decoded.stops) ? decoded.stops : defaults.stops,
           bgColor: typeof decoded.bgColor === 'string' ? decoded.bgColor : defaults.bgColor,
+          angle: typeof decoded.angle === 'number' ? decoded.angle : defaults.angle,
         };
       }
     } catch (e) {
@@ -74,10 +76,19 @@ function smoothstep(t: number): number {
 }
 
 // Main SVG generation logic
-function generateGradientSVG(width: number, height: number, squareSize: number, stops: Stop[], globalBg: string, sizeStep: number = 1): string {
+function generateGradientSVG(width: number, height: number, squareSize: number, stops: Stop[], globalBg: string, sizeStep: number = 1, angle: number = 0): string {
   const cols = Math.ceil(width / squareSize);
   const rows = Math.ceil(height / squareSize);
   const sortedStops = [...stops].sort((a, b) => a.position - b.position);
+
+  // Pre-compute projection values for gradient rotation
+  const rad = angle * Math.PI / 180;
+  const cosA = Math.sin(rad);
+  const sinA = -Math.cos(rad);
+  const corners = [0, width * cosA, height * sinA, width * cosA + height * sinA];
+  const minProj = Math.min(...corners);
+  const maxProj = Math.max(...corners);
+  const projRange = maxProj - minProj;
 
   // Build segments between adjacent stops
   const segments: Array<{
@@ -157,7 +168,9 @@ function generateGradientSVG(width: number, height: number, squareSize: number, 
       const cellX = col * squareSize;
       const cellY = row * squareSize;
       const cx = cellX + squareSize / 2;
-      const xPercent = (cx / width) * 100;
+      const cy = cellY + squareSize / 2;
+      const projected = cx * cosA + cy * sinA;
+      const xPercent = projRange === 0 ? 50 : ((projected - minProj) / projRange) * 100;
 
       const { fg, bg, size } = getCellInfo(xPercent);
 
@@ -341,10 +354,11 @@ export default function App() {
   const [selector, setSelector] = useState<string>(initialState.selector);
   const [stops, setStops] = useState<Stop[]>(initialState.stops);
   const [bgColor, setBgColor] = useState<string>(initialState.bgColor);
+  const [angle, setAngle] = useState<number>(initialState.angle);
   const svgContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const state = { width, height, squareSize, sizeStep, selector, stops, bgColor };
+    const state = { width, height, squareSize, sizeStep, selector, stops, bgColor, angle };
     const encoder = new TextEncoder();
     const uint8array = encoder.encode(JSON.stringify(state));
 
@@ -358,11 +372,11 @@ export default function App() {
     params.set('config', encoded);
     const newUrl = `${window.location.pathname}?${params.toString()}`;
     window.history.replaceState({}, '', newUrl);
-  }, [width, height, squareSize, sizeStep, selector, stops, bgColor]);
+  }, [width, height, squareSize, sizeStep, selector, stops, bgColor, angle]);
 
   const svgString = useMemo(() => {
-    return generateGradientSVG(width, height, squareSize, stops, bgColor, sizeStep);
-  }, [width, height, squareSize, stops, bgColor, sizeStep]);
+    return generateGradientSVG(width, height, squareSize, stops, bgColor, sizeStep, angle);
+  }, [width, height, squareSize, stops, bgColor, sizeStep, angle]);
 
   const updateStop = useCallback((index: number, newStop: Stop) => {
     setStops((prev) => prev.map((s, i) => (i === index ? newStop : s)));
@@ -466,6 +480,12 @@ applyY2KGradient();`;
                   <input type="number" value={sizeStep} min={0.1} max={squareSize} step={0.1} onChange={(e) => setSizeStep(Number(e.target.value))}
                     style={{ width: 46, padding: "2px 4px", border: "1px solid #999", fontFamily: "monospace" }} />
                   <span style={{ color: "#888" }}>px</span>
+                </label>
+                <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  Angle
+                  <input type="number" value={angle} min={0} max={359} step={1} onChange={(e) => setAngle(Number(e.target.value))}
+                    style={{ width: 46, padding: "2px 4px", border: "1px solid #999", fontFamily: "monospace" }} />
+                  <span style={{ color: "#888" }}>°</span>
                 </label>
                 <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
                   BG
