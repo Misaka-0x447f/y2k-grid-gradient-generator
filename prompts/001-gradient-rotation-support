@@ -47,3 +47,26 @@ Opus：对，现在 0° 是左到右，这是数学坐标系的约定。应该�
 
        改动很小，只需要调投影方向的计算。
 Opus：完事。现在角度语义和 CSS linear-gradient 一致。
+用户：45 度有点 bug，怀疑是优化的问题，先加个优化体积的开关？
+Opus: 加好了。Merge checkbox 不需要持久化到 URL（纯调试用途），取消勾选即可关闭矩形合并来排查 45° 的问题。
+用户：需要持久化的
+Opus：好了，mergeRects 现在走完整的 URL 持久化链路了：defaults → decode → state → encode。
+用户：嗯，我确定是优化的问题了。关了就好了。优化的思路可能要改，说说你的思路？
+Opus：我怀疑问题出在渲染顺序（z-order）。
+
+       现在 sizeStep 量化时，每个 cell 可能产生两个重叠的 rect：一个实心的 lower 和一个半透明的 upper。原始顺序是先 lower 后
+       upper（半透明盖在实心上面）。merge 按 fill|opacity|x|w 重新分组后，不同 cell 的 rect 被打散重排，同一个 cell 内的 lower 和 upper
+       的先后关系不再保证。
+
+       0° 时没问题是因为同一列所有 cell 的 gradient 值相同，产生完全一样的 rect 对，merge 后等价于原来的叠加。45° 时每个 cell 的 gradient
+       值不同，merge 打散后 z-order 就乱了。
+
+       两个思路：
+
+       1. 分层 merge：把 rawRects 分成 bg 层、lower 层、upper 层，每层内部独立 merge，最后按层顺序拼接输出。这样层间 z-order 不变，层内 merge
+       也安全（同层不存在互相覆盖）。
+       2. 只 merge 全尺寸 rect：只对 w === squareSize && h === squareSize 的格子做合并（bg 填充块），这些天然网格对齐、不存在重叠。小尺寸的前景
+        rect 直接跳过 merge。
+
+       思路 1 优化效果更好，思路 2 实现更简单。你倾向哪个？
+用户：请尝试实现思路 1。

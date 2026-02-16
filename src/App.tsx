@@ -36,6 +36,7 @@ function getInitialState() {
     stops: DEFAULT_STOPS,
     bgColor: "#c0c0c0",
     angle: 90,
+    mergeRects: true,
   };
 
   const params = new URLSearchParams(window.location.search);
@@ -58,6 +59,7 @@ function getInitialState() {
           stops: Array.isArray(decoded.stops) ? decoded.stops : defaults.stops,
           bgColor: typeof decoded.bgColor === 'string' ? decoded.bgColor : defaults.bgColor,
           angle: typeof decoded.angle === 'number' ? decoded.angle : defaults.angle,
+          mergeRects: typeof decoded.mergeRects === 'boolean' ? decoded.mergeRects : defaults.mergeRects,
         };
       }
     } catch (e) {
@@ -76,7 +78,7 @@ function smoothstep(t: number): number {
 }
 
 // Main SVG generation logic
-function generateGradientSVG(width: number, height: number, squareSize: number, stops: Stop[], globalBg: string, sizeStep: number = 1, angle: number = 0): string {
+function generateGradientSVG(width: number, height: number, squareSize: number, stops: Stop[], globalBg: string, sizeStep: number = 1, angle: number = 0, mergeRects: boolean = true): string {
   const cols = Math.ceil(width / squareSize);
   const rows = Math.ceil(height / squareSize);
   const sortedStops = [...stops].sort((a, b) => a.position - b.position);
@@ -161,7 +163,13 @@ function generateGradientSVG(width: number, height: number, squareSize: number, 
   }
 
   const bgRect: RawRect = { x: 0, y: 0, w: width, h: height, fill: globalBg };
-  const rawRects: RawRect[] = [];
+  // Three layers to preserve z-order during merge:
+  // Layer 0: cell background fills (full cell size)
+  // Layer 1: solid foreground rects (lower step)
+  // Layer 2: semi-transparent foreground rects (upper step)
+  const bgLayer: RawRect[] = [];
+  const fgSolidLayer: RawRect[] = [];
+  const fgAlphaLayer: RawRect[] = [];
 
   for (let row = 0; row < rows; row++) {
     for (let col = 0; col < cols; col++) {
@@ -175,7 +183,7 @@ function generateGradientSVG(width: number, height: number, squareSize: number, 
       const { fg, bg, size } = getCellInfo(xPercent);
 
       if (bg && bg !== globalBg) {
-        rawRects.push({ x: cellX, y: cellY, w: squareSize, h: squareSize, fill: bg });
+        bgLayer.push({ x: cellX, y: cellY, w: squareSize, h: squareSize, fill: bg });
       }
 
       if (fg && size > 0.001) {
@@ -188,18 +196,18 @@ function generateGradientSVG(width: number, height: number, squareSize: number, 
           if (lower > 0) {
             const sx = cx - lower / 2;
             const sy = cellY + squareSize / 2 - lower / 2;
-            rawRects.push({ x: sx, y: sy, w: lower, h: lower, fill: fg, shapeRendering: "geometricPrecision" });
+            fgSolidLayer.push({ x: sx, y: sy, w: lower, h: lower, fill: fg, shapeRendering: "geometricPrecision" });
           }
           if (frac > 0.001 && upper <= squareSize) {
             const sx = cx - upper / 2;
             const sy = cellY + squareSize / 2 - upper / 2;
-            rawRects.push({ x: sx, y: sy, w: upper, h: upper, fill: fg, opacity: frac, shapeRendering: "geometricPrecision" });
+            fgAlphaLayer.push({ x: sx, y: sy, w: upper, h: upper, fill: fg, opacity: frac, shapeRendering: "geometricPrecision" });
           }
         } else {
           if (rawSize > 0) {
             const sx = cx - rawSize / 2;
             const sy = cellY + squareSize / 2 - rawSize / 2;
-            rawRects.push({ x: sx, y: sy, w: rawSize, h: rawSize, fill: fg, shapeRendering: "geometricPrecision" });
+            fgSolidLayer.push({ x: sx, y: sy, w: rawSize, h: rawSize, fill: fg, shapeRendering: "geometricPrecision" });
           }
         }
       }
@@ -269,7 +277,14 @@ function generateGradientSVG(width: number, height: number, squareSize: number, 
     return merged;
   }
 
-  const mergedRects = mergeHorizontally(mergeVertically(rawRects));
+  const rawRects = [...bgLayer, ...fgSolidLayer, ...fgAlphaLayer];
+  const mergedRects = mergeRects
+    ? [
+        ...mergeHorizontally(mergeVertically(bgLayer)),
+        ...mergeHorizontally(mergeVertically(fgSolidLayer)),
+        ...mergeHorizontally(mergeVertically(fgAlphaLayer)),
+      ]
+    : rawRects;
 
   // Build SVG elements
   const elements: string[] = [];
@@ -355,10 +370,11 @@ export default function App() {
   const [stops, setStops] = useState<Stop[]>(initialState.stops);
   const [bgColor, setBgColor] = useState<string>(initialState.bgColor);
   const [angle, setAngle] = useState<number>(initialState.angle);
+  const [mergeRects, setMergeRects] = useState<boolean>(initialState.mergeRects);
   const svgContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const state = { width, height, squareSize, sizeStep, selector, stops, bgColor, angle };
+    const state = { width, height, squareSize, sizeStep, selector, stops, bgColor, angle, mergeRects };
     const encoder = new TextEncoder();
     const uint8array = encoder.encode(JSON.stringify(state));
 
@@ -372,11 +388,11 @@ export default function App() {
     params.set('config', encoded);
     const newUrl = `${window.location.pathname}?${params.toString()}`;
     window.history.replaceState({}, '', newUrl);
-  }, [width, height, squareSize, sizeStep, selector, stops, bgColor, angle]);
+  }, [width, height, squareSize, sizeStep, selector, stops, bgColor, angle, mergeRects]);
 
   const svgString = useMemo(() => {
-    return generateGradientSVG(width, height, squareSize, stops, bgColor, sizeStep, angle);
-  }, [width, height, squareSize, stops, bgColor, sizeStep, angle]);
+    return generateGradientSVG(width, height, squareSize, stops, bgColor, sizeStep, angle, mergeRects);
+  }, [width, height, squareSize, stops, bgColor, sizeStep, angle, mergeRects]);
 
   const updateStop = useCallback((index: number, newStop: Stop) => {
     setStops((prev) => prev.map((s, i) => (i === index ? newStop : s)));
@@ -487,6 +503,10 @@ applyY2KGradient();`;
                     style={{ width: 46, padding: "2px 4px", border: "1px solid #999", fontFamily: "monospace" }} />
                   <span style={{ color: "#888" }}>°</span>
                 </label>
+                <label style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }}>
+                  <input type="checkbox" checked={mergeRects} onChange={(e) => setMergeRects(e.target.checked)} />
+                  <span style={{ color: "#444", fontSize: 12 }}>Merge neighbour square (recommended)</span>
+                </label>
                 <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
                   BG
                   <input type="color" value={bgColor} onChange={(e) => setBgColor(e.target.value)}
@@ -515,7 +535,7 @@ applyY2KGradient();`;
               <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 8, color: "#333" }}>Preview</div>
               <div ref={svgContainerRef} style={{
                 border: "2px solid", borderColor: "#808080 #fff #fff #808080",
-                background: "#fff", padding: 4, overflow: "auto", maxHeight: 400,
+                background: "#fff", padding: 4, overflow: "auto", maxHeight: '40svh',
               }} dangerouslySetInnerHTML={{ __html: svgString }} />
             </div>
 
