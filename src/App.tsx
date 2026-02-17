@@ -32,9 +32,8 @@ function getInitialState() {
     height: 80,
     squareSize: 8,
     sizeStep: 1,
-    selector: "#gradient-target",
     stops: DEFAULT_STOPS,
-    bgColor: "#c0c0c0",
+    bgColor: "#00000000",
     angle: 90,
     mergeRects: true,
   };
@@ -55,7 +54,6 @@ function getInitialState() {
           height: typeof decoded.height === 'number' ? decoded.height : defaults.height,
           squareSize: typeof decoded.squareSize === 'number' ? decoded.squareSize : defaults.squareSize,
           sizeStep: typeof decoded.sizeStep === 'number' ? decoded.sizeStep : defaults.sizeStep,
-          selector: typeof decoded.selector === 'string' ? decoded.selector : defaults.selector,
           stops: Array.isArray(decoded.stops) ? decoded.stops : defaults.stops,
           bgColor: typeof decoded.bgColor === 'string' ? decoded.bgColor : defaults.bgColor,
           angle: typeof decoded.angle === 'number' ? decoded.angle : defaults.angle,
@@ -333,11 +331,9 @@ function StopEditor({ stop, index, onChange, onRemove, canRemove }: StopEditorPr
       </label>
       <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
         <span style={{ color: "#444" }}>Color</span>
-        <input
-          type="color" value={stop.color}
-          onChange={(e) => onChange({ ...stop, color: e.target.value })}
-          style={{ width: 28, height: 22, padding: 0, border: "1px solid #999", cursor: "pointer" }}
-        />
+        <div style={{ width: 28, height: 22, border: "1px solid #999", background: "repeating-conic-gradient(#ccc 0% 25%, #fff 0% 50%) 0 0 / 8px 8px", position: "relative", display: "inline-block" }}>
+          <div style={{ width: "100%", height: "100%", background: stop.color }} />
+        </div>
         <input
           type="text" value={stop.color}
           onChange={(e) => onChange({ ...stop, color: e.target.value })}
@@ -366,7 +362,6 @@ export default function App() {
   const [height, setHeight] = useState<number>(initialState.height);
   const [squareSize, setSquareSize] = useState<number>(initialState.squareSize);
   const [sizeStep, setSizeStep] = useState<number>(initialState.sizeStep);
-  const [selector, setSelector] = useState<string>(initialState.selector);
   const [stops, setStops] = useState<Stop[]>(initialState.stops);
   const [bgColor, setBgColor] = useState<string>(initialState.bgColor);
   const [angle, setAngle] = useState<number>(initialState.angle);
@@ -374,7 +369,7 @@ export default function App() {
   const svgContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const state = { width, height, squareSize, sizeStep, selector, stops, bgColor, angle, mergeRects };
+    const state = { width, height, squareSize, sizeStep, stops, bgColor, angle, mergeRects };
     const encoder = new TextEncoder();
     const uint8array = encoder.encode(JSON.stringify(state));
 
@@ -388,7 +383,7 @@ export default function App() {
     params.set('config', encoded);
     const newUrl = `${window.location.pathname}?${params.toString()}`;
     window.history.replaceState({}, '', newUrl);
-  }, [width, height, squareSize, sizeStep, selector, stops, bgColor, angle, mergeRects]);
+  }, [width, height, squareSize, sizeStep, stops, bgColor, angle, mergeRects]);
 
   const svgString = useMemo(() => {
     return generateGradientSVG(width, height, squareSize, stops, bgColor, sizeStep, angle, mergeRects);
@@ -417,10 +412,10 @@ export default function App() {
   }, [svgString]);
 
   const handleCopyCode = useCallback(() => {
-    const code = `// Y2K Gradient - Apply to "${selector}"
+    const code = `// Y2K Gradient - Apply to "#gradient-target"
 function applyY2KGradient() {
-  const target = document.querySelector('${selector}');
-  if (!target) { console.warn('Target not found: ${selector}'); return; }
+  const target = document.querySelector('#gradient-target');
+  if (!target) { console.warn('Target not found: #gradient-target'); return; }
   const svgData = \`${svgString.replace(/`/g, "\\`")}\`;
   const encoded = 'data:image/svg+xml,' + encodeURIComponent(svgData);
   target.style.backgroundImage = 'url("' + encoded + '")';
@@ -428,7 +423,7 @@ function applyY2KGradient() {
 }
 applyY2KGradient();`;
     navigator.clipboard.writeText(code).catch(() => {});
-  }, [svgString, selector, width, height]);
+  }, [svgString, width, height]);
 
   const handleCopySVG = useCallback(() => {
     navigator.clipboard.writeText(svgString).catch(() => {});
@@ -470,12 +465,7 @@ applyY2KGradient();`;
             <div style={panelStyle}>
               <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 8, color: "#333" }}>Output Settings</div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", fontSize: 12 }}>
-                <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                  Selector
-                  <input value={selector} onChange={(e) => setSelector(e.target.value)}
-                    style={{ width: 140, padding: "2px 4px", border: "1px solid #999", fontFamily: "monospace", fontSize: 12 }} />
-                </label>
-                <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
+<label style={{ display: "flex", alignItems: "center", gap: 4 }}>
                   Width
                   <input type="number" value={width} min={10} max={2000} onChange={(e) => setWidth(Number(e.target.value))}
                     style={{ width: 56, padding: "2px 4px", border: "1px solid #999", fontFamily: "monospace" }} />
@@ -509,8 +499,11 @@ applyY2KGradient();`;
                 </label>
                 <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
                   BG
-                  <input type="color" value={bgColor} onChange={(e) => setBgColor(e.target.value)}
-                    style={{ width: 28, height: 20, padding: 0, border: "1px solid #999", cursor: "pointer" }} />
+                  <div style={{ width: 28, height: 22, border: "1px solid #999", background: "repeating-conic-gradient(#ccc 0% 25%, #fff 0% 50%) 0 0 / 8px 8px", position: "relative", display: "inline-block" }}>
+                    <div style={{ width: "100%", height: "100%", background: bgColor }} />
+                  </div>
+                  <input type="text" value={bgColor} onChange={(e) => setBgColor(e.target.value)}
+                    style={{ width: 72, padding: "2px 4px", border: "1px solid #999", fontFamily: "monospace", fontSize: 12 }} />
                 </label>
               </div>
             </div>
@@ -535,7 +528,7 @@ applyY2KGradient();`;
               <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 8, color: "#333" }}>Preview</div>
               <div ref={svgContainerRef} style={{
                 border: "2px solid", borderColor: "#808080 #fff #fff #808080",
-                background: "#fff", padding: 4, overflow: "auto", maxHeight: '40svh',
+                background: "repeating-conic-gradient(#e0e0e0 0% 25%, #fff 0% 50%) 0 0 / 16px 16px", padding: 4, overflow: "auto", maxHeight: '40svh',
               }} dangerouslySetInnerHTML={{ __html: svgString }} />
             </div>
 
