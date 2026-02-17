@@ -458,7 +458,7 @@ applyY2KGradient();`;
         }}>
           <div style={titleBarStyle}>
             <span style={{ width: 14, height: 14, background: "#d4d0c8", border: "1px solid #808080", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 9, color: "#000", fontWeight: 400 }}>◆</span>
-            Y2K Gradient Generator
+            Y2K Grid Gradient Generator
           </div>
 
           <div style={{ padding: 10 }}>
